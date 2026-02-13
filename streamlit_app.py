@@ -58,3 +58,45 @@ try:
 except Exception as e:
     st.error("Verbindung zum Google Sheet noch nicht konfiguriert.")
     st.info("Bitte stelle sicher, dass die URL in der streamlit_app.py korrekt ist und das Sheet auf 'Jeder mit dem Link kann lesen' steht.")
+
+
+import plotly.express as px
+
+# --- DATEN-VORBEREITUNG FÜR DAS LINIENDIAGRAMM ---
+# Wir wandeln das Datum in ein Monats-Format um (z.B. 2024-01)
+df['month'] = pd.to_datetime(df['created_at']).dt.to_period('M').astype(str)
+tickets_per_month = df.groupby('month').size().reset_index(name='Anzahl')
+
+# --- LAYOUT: ZWEI SPALTEN FÜR DIE CHARTS ---
+col_left, col_right = st.columns(2)
+
+with col_left:
+    st.markdown("### 📊 Tickets pro Level")
+    # Zähle die Tickets pro Support_Level
+    level_counts = filtered_df['Support_Level'].value_counts().reset_index()
+    level_counts.columns = ['Support_Level', 'Anzahl']
+    
+    # Balkendiagramm (Horizontal ist oft schöner für Level)
+    fig_bar = px.bar(
+        level_counts, 
+        x='Anzahl', 
+        y='Support_Level', 
+        orientation='h',
+        color='Support_Level',
+        color_discrete_map={'1st Level': '#00b4d8', '2nd Level': '#0077b6', '3rd Level': '#03045e'} # Blau-Töne
+    )
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+with col_right:
+    st.markdown("### 📈 Ticket-Trend pro Monat")
+    # Liniendiagramm
+    fig_line = px.line(
+        tickets_per_month, 
+        x='month', 
+        y='Anzahl',
+        markers=True,
+        title="Eingangsvolumen"
+    )
+    # Optik-Tuning für das Liniendiagramm
+    fig_line.update_traces(line_color='#ff7a59') # HubSpot-Orange
+    st.plotly_chart(fig_line, use_container_width=True)
