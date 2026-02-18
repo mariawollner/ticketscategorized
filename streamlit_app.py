@@ -5,7 +5,7 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 # Ersetze diesen Link durch deinen Google Sheet Link (Freigabe: Jeder mit dem Link)
-SHEET_URL = "DEIN_NORMALER_GOOGLE_SHEET_LINK"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/14I3ru-sF5Q889NYBzUJDyUzLeIHN8G8ZFwzk78IOCKM/edit?usp=sharing"
 
 def get_csv_url(url):
     if "/edit" in url:
