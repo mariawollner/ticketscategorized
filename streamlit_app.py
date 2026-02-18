@@ -24,40 +24,40 @@ def load_data():
     csv_url = get_csv_url(SHEET_URL)
     df = pd.read_csv(csv_url, dtype=str)
     
-    # Numerische Korrekturen
+    # Numerische Konvertierung
     if 'confidence_score' in df.columns:
         df['confidence_score'] = df['confidence_score'].str.replace(',', '.').pipe(pd.to_numeric, errors='coerce')
     
+    # Extrahiere Zahlen für Berechnungen (z.B. "Level 1" -> 1)
     if 'predicted_level' in df.columns:
         df['level_num'] = df['predicted_level'].str.extract('(\d+)').astype(float)
     if 'owner_role' in df.columns:
         df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
 
+    # Zeitformate
     df['created'] = pd.to_datetime(df['created'], errors='coerce')
     if 'closed' in df.columns:
         df['closed'] = pd.to_datetime(df['closed'], errors='coerce')
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
     
-    if 'ticket_id' in df.columns:
-        df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
-    
-    # Hilfsspalten für zeitliche Gruppierung
+    # Hilfspalten für Monate
     if 'created' in df.columns:
         df['m_name'] = df['created'].dt.strftime('%B %Y')
         df['m_sort'] = df['created'].dt.strftime('%Y-%m')
-        
+    
+    if 'ticket_id' in df.columns:
+        df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
+    
     return df.sort_values(by='created', ascending=False)
 
-# --- LAYOUT SETUP ---
+# --- LAYOUT ---
 st.set_page_config(page_title="CS Smart Dashboard", layout="wide")
 st.title("🎫 Customer Success Smart Dashboard")
 
 try:
     data = load_data()
 
-    # ==========================================
-    # --- 2. OPERATIONAL VIEW (Oben) ---
-    # ==========================================
+    # --- 2. OPERATIONAL VIEW (Tabelle oben) ---
     st.header("Operational View")
     c1, c2, c3 = st.columns(3)
     with c1: 
@@ -86,77 +86,60 @@ try:
 
     st.markdown("---")
 
-    # ==========================================
     # --- 3. CUSTOMER SUCCESS INSIGHTS ---
-    # ==========================================
     st.header("📊 Customer Success Insights")
     
-    # NEU: Avg Resolution Time pro Level pro Monat
+    # A) Resolution Time pro Level & Monat
     if 'business_hours' in data.columns and 'predicted_level' in data.columns:
         st.subheader("Avg. Resolution Time (Hours) by Level & Month")
-        
-        # Gruppierung der Daten
         res_time_data = data.groupby(['m_sort', 'm_name', 'predicted_level'])['business_hours'].mean().reset_index()
         res_time_data = res_time_data.sort_values('m_sort')
         
-        fig_res = px.bar(
-            res_time_data, 
-            x='m_name', 
-            y='business_hours', 
-            color='predicted_level',
-            barmode='group', # Das sorgt für die 3 Säulen nebeneinander
-            title="Resolution Time Efficiency",
-            labels={'business_hours': 'Avg Hours', 'm_name': 'Month'},
-            color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"}
-        )
+        fig_res = px.bar(res_time_data, x='m_name', y='business_hours', color='predicted_level',
+                         barmode='group', text_auto='.1f',
+                         color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
         st.plotly_chart(fig_res, use_container_width=True)
 
-    # Bestehende Diagramme (Monthly Volume & Pie)
     col_a, col_b = st.columns(2)
     with col_a:
-        if 'created' in data.columns:
-            m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
-            fig_bar = px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', 
-                             title="Monthly Volume & Complexity", text_auto=True,
-                             color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
-            st.plotly_chart(fig_bar, use_container_width=True)
+        # B) Monthly Volume
+        m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
+        fig_vol = px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', title="Monthly Volume & Complexity", text_auto=True,
+                         color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
+        st.plotly_chart(fig_vol, use_container_width=True)
             
     with col_b:
-        if 'predicted_level' in data.columns:
-            st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
+        # C) Pie Chart
+        st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
 
     st.markdown("---")
 
-    # ==========================================
-    # --- 4. STRATEGIC INSIGHTS (AI KPIs) ---
-    # ==========================================
+    # --- 4. STRATEGIC INSIGHTS ---
     st.header("📈 Strategic Insights")
-    
     k1, k2, k3 = st.columns(3)
     
-    # KPI 1: Auto Route Coverage
+    # KPI: Auto Route Coverage (ROBUSTER FILTER)
     coverage_val = 0.0
     if 'routing_score' in data.columns:
-        clean_vals = data['routing_score'].fillna("").str.lower().str.replace(" ", "").str.replace("-", "")
-        auto_count = (clean_vals == "autoroute").sum()
+        # Sucht nach 'auto' im Text, ignoriert Groß/Kleinschreibung
+        auto_count = data['routing_score'].fillna("").str.lower().str.contains("auto").sum()
         coverage_val = auto_count / len(data) if len(data) > 0 else 0.0
     k1.metric("Auto Route Coverage", f"{coverage_val:.1%}")
 
-    # KPI 2: Engineering Noise
+    # KPI: Engineering Noise (L3 vorhergesagt, aber von niedrigerem Level gelöst)
     if 'level_num' in data.columns and 'role_num' in data.columns:
         l3_pred = data[data['level_num'] == 3]
         noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
         k2.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
 
-    # KPI 3: AI Confidence
-    k3.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}" if 'confidence_score' in data.columns else "0%")
+    # KPI: AI Confidence
+    k3.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}" if 'confidence_score' in data.columns and not pd.isna(data['confidence_score'].mean()) else "0%")
 
-    # Confusion Matrix ganz unten
+    # Confusion Matrix
     st.subheader("Deep Dive: AI Prediction vs. Actual Human Assignment")
     if 'owner_role' in data.columns and 'predicted_level' in data.columns:
         matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
-        st.plotly_chart(px.imshow(matrix, text_auto=True, color_continuous_scale='Blues', 
-                                  labels=dict(x="Actual Human Role", y="AI Prediction")), use_container_width=True)
+        st.plotly_chart(px.imshow(matrix, text_auto=True, color_continuous_scale='Blues'), use_container_width=True)
 
 except Exception as e:
-    st.error(f"Ein Fehler ist aufgetreten: {e}")
+    st.error(f"Fehler: {e}")
