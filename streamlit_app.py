@@ -22,24 +22,26 @@ def calculate_business_hours(start, end):
 @st.cache_data(ttl=60)
 def load_data():
     csv_url = get_csv_url(SHEET_URL)
-    df = pd.read_csv(csv_url, dtype=str)
+    df = pd.read_csv(csv_url, dtype=str) # Alles erst als String laden
     
-    # 1. Numerische Korrekturen (Confidence Score)
+    # --- DATEN-REINIGUNG (Hier lag der Fehler) ---
+    
+    # 1. Confidence Score: Komma zu Punkt, dann zu Float
     if 'confidence_score' in df.columns:
-        # Ersetzt Komma durch Punkt und wandelt alles in Zahlen um, Fehler werden zu NaN
         df['confidence_score'] = pd.to_numeric(df['confidence_score'].str.replace(',', '.'), errors='coerce')
     
-    # 2. Level Extraktion (sicherstellen, dass es Zahlen sind)
+    # 2. Level Extraktion: Wir erzwingen Zahlen (Float), um Vergleiche zu ermöglichen
+    # Der Zusatz .fillna(0) verhindert, dass der Vergleich mit None-Typen scheitert
     if 'predicted_level' in df.columns:
-        df['level_num'] = pd.to_numeric(df['predicted_level'].str.extract('(\d+)')[0], errors='coerce')
+        df['level_num'] = pd.to_numeric(df['predicted_level'].str.extract('(\d+)')[0], errors='coerce').fillna(0)
     if 'owner_role' in df.columns:
-        df['role_num'] = pd.to_numeric(df['owner_role'].str.extract('(\d+)')[0], errors='coerce')
+        df['role_num'] = pd.to_numeric(df['owner_role'].str.extract('(\d+)')[0], errors='coerce').fillna(0)
 
     # 3. Zeit-Konvertierung
     df['created'] = pd.to_datetime(df['created'], errors='coerce')
     if 'closed' in df.columns:
         df['closed'] = pd.to_datetime(df['closed'], errors='coerce')
-        # Business Hours nur berechnen, wenn beide Daten vorhanden sind
+        # Business Hours Berechnung
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
     
     # Hilfsspalten für zeitliche Gruppierung
@@ -108,15 +110,15 @@ try:
             st.subheader("Top 5 Owners")
             if 'owner' in data.columns and 'm_sort' in data.columns:
                 latest_month_sort = data['m_sort'].max()
-                latest_month_name = data[data['m_sort'] == latest_month_sort]['m_name'].iloc[0]
-                st.caption(f"Tickets in {latest_month_name}")
-                
-                top_owners = (data[data['m_sort'] == latest_month_sort]['owner']
-                              .value_counts()
-                              .head(5)
-                              .reset_index())
-                top_owners.columns = ['Owner', 'Tickets']
-                st.table(top_owners)
+                # Sicherheitscheck falls keine Daten für m_sort da sind
+                current_month_data = data[data['m_sort'] == latest_month_sort]
+                if not current_month_data.empty:
+                    latest_month_name = current_month_data['m_name'].iloc[0]
+                    st.caption(f"Tickets in {latest_month_name}")
+                    
+                    top_owners = current_month_data['owner'].value_counts().head(5).reset_index()
+                    top_owners.columns = ['Owner', 'Tickets']
+                    st.table(top_owners)
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -144,13 +146,13 @@ try:
         coverage_val = auto_count / len(data) if len(data) > 0 else 0.0
     k1.metric("Auto Route Coverage", f"{coverage_val:.1%}")
 
-    # KPI 2: Engineering Noise
+    # KPI 2: Engineering Noise (L3 vorhergesagt, aber kleiner Level gelöst)
     noise = 0.0
     if 'level_num' in data.columns and 'role_num' in data.columns:
-        l3_pred = data[data['level_num'] == 3].copy()
-        if len(l3_pred) > 0:
-            # Sicherstellen, dass Vergleiche nur mit Zahlen stattfinden
-            noise = (l3_pred['role_num'] < 3).mean()
+        # Hier erzwingen wir, dass beide Spalten numerisch verglichen werden
+        l3_pred = data[data['level_num'].astype(float) == 3.0]
+        if not l3_pred.empty:
+            noise = (l3_pred['role_num'].astype(float) < 3.0).mean()
         k2.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
 
     # KPI 3: AI Confidence
@@ -167,4 +169,6 @@ try:
 
 except Exception as e:
     st.error(f"Ein Fehler ist aufgetreten: {e}")
-    st.info("Hinweis: Überprüfe, ob alle numerischen Spalten im Sheet (z.B. confidence_score) korrekt gefüllt sind.")
+    # Zeige dem User die Datentypen an, falls es immer noch kracht
+    if 'data' in locals():
+        st.write("Interne Datentypen zur Fehleranalyse:", data[['predicted_level', 'owner_role', 'level_num', 'role_num']].dtypes)
