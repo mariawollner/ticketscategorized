@@ -57,32 +57,49 @@ st.title("🎫 Customer Success Smart Dashboard")
 try:
     data = load_data()
 
-    # --- 2. OPERATIONAL VIEW ---
+    # --- 2. OPERATIONAL VIEW (Jetzt mit 4 Filter-Spalten) ---
     st.header("Operational View")
-    c1, c2, c3 = st.columns(3)
+    
+    # Wir erstellen 4 Spalten statt 3
+    c1, c2, c3, c4 = st.columns(4)
+    
     with c1: 
         owner_options = sorted(data['owner'].dropna().unique()) if 'owner' in data.columns else []
         owner_f = st.multiselect("Filter by Owner", options=owner_options)
-    with c2: 
+    
+    with c2:
+        # NEUER FILTER: Owner Role
+        role_options = sorted(data['owner_role'].dropna().unique()) if 'owner_role' in data.columns else []
+        role_f = st.multiselect("Filter by Role", options=role_options)
+        
+    with c3: 
         status_options = sorted(data['status'].dropna().unique()) if 'status' in data.columns else []
         status_f = st.multiselect("Filter by Status", options=status_options)
-    with c3: 
+        
+    with c4: 
         level_options = sorted(data['predicted_level'].dropna().unique()) if 'predicted_level' in data.columns else []
         level_f = st.multiselect("Filter by Predicted Level", options=level_options)
 
+    # Filter-Logik anwenden
     df_filtered = data.copy()
     if owner_f: df_filtered = df_filtered[df_filtered['owner'].isin(owner_f)]
+    if role_f:  df_filtered = df_filtered[df_filtered['owner_role'].isin(role_f)] # Logik für Rolle
     if status_f: df_filtered = df_filtered[df_filtered['status'].isin(status_f)]
     if level_f: df_filtered = df_filtered[df_filtered['predicted_level'].isin(level_f)]
 
+    # Tabelle anzeigen
     st.dataframe(
-        df_filtered[['subject', 'created', 'predicted_level', 'owner', 'status', 'hubspot_url']].head(100),
+        df_filtered[['subject', 'created', 'owner', 'owner_role', 'predicted_level', 'status', 'hubspot_url']].head(100),
         column_config={
             "hubspot_url": st.column_config.LinkColumn("HubSpot Link", display_text="Open 🔗"),
-            "created": st.column_config.DatetimeColumn("Created At", format="DD.MM.YYYY, HH:mm")
+            "created": st.column_config.DatetimeColumn("Created At", format="DD.MM.YYYY, HH:mm"),
+            "owner_role": "Role",
+            "predicted_level": "AI Level"
         },
         use_container_width=True, hide_index=True
     )
+
+   
 
     st.markdown("---")
 
