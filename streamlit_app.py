@@ -24,23 +24,19 @@ def load_data():
     csv_url = get_csv_url(SHEET_URL)
     df = pd.read_csv(csv_url, dtype=str)
     
-    # Numerische Korrekturen
     if 'confidence_score' in df.columns:
         df['confidence_score'] = df['confidence_score'].str.replace(',', '.').pipe(pd.to_numeric, errors='coerce')
     
-    # Zahlen aus Text extrahieren (z.B. "1st-line" -> 1.0)
     if 'predicted_level' in df.columns:
         df['level_num'] = df['predicted_level'].str.extract('(\d+)').astype(float)
     if 'owner_role' in df.columns:
         df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
 
-    # Zeitformate
     df['created'] = pd.to_datetime(df['created'], errors='coerce')
     if 'closed' in df.columns:
         df['closed'] = pd.to_datetime(df['closed'], errors='coerce')
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
     
-    # HubSpot Link
     if 'ticket_id' in df.columns:
         df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
     
@@ -71,7 +67,6 @@ try:
     if status_f: df_filtered = df_filtered[df_filtered['status'].isin(status_f)]
     if level_f: df_filtered = df_filtered[df_filtered['predicted_level'].isin(level_f)]
 
-    # Tabelle oben anzeigen
     st.dataframe(
         df_filtered[['subject', 'created', 'predicted_level', 'owner', 'status', 'hubspot_url']].head(100),
         column_config={
@@ -87,44 +82,50 @@ try:
     st.header("📈 Strategic Insights")
     k1, k2, k3, k4 = st.columns(4)
     
-    # KPI 1: Bearbeitungszeit
     if 'business_hours' in data.columns:
         k1.metric("Avg. Resolution (Mo-Fr)", f"{data['business_hours'].mean():.1f}h")
     
-    # KPI 2: Auto Route Coverage (basierend auf routing_score == "Auto-route")
     if 'routing_score' in data.columns:
         auto_route_count = (data['routing_score'] == "Auto-route").sum()
         coverage = auto_route_count / len(data) if len(data) > 0 else 0
-        k2.metric("Auto Route Coverage", f"{coverage:.1%}", help="Tickets with 'Auto-route' in routing_score")
+        k2.metric("Auto Route Coverage", f"{coverage:.1%}")
 
-    # KPI 3: Engineering Noise
     if 'level_num' in data.columns and 'role_num' in data.columns:
         l3_pred = data[data['level_num'] == 3]
         noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
         k3.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
 
-    # KPI 4: AI Confidence
     if 'confidence_score' in data.columns:
         k4.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}")
 
-    # Diagramme
     ca, cb = st.columns(2)
     with ca:
         if 'created' in data.columns:
             data['m_name'] = data['created'].dt.strftime('%B %Y')
             data['m_sort'] = data['created'].dt.strftime('%Y-%m')
             m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
-            
-            fig_bar = px.bar(
-                m_lvl, x='m_name', y='Tickets', color='predicted_level', 
-                title="Monthly Volume & Complexity", text_auto=True,
-                color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"}
-            )
+            fig_bar = px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', 
+                             title="Monthly Volume & Complexity", text_auto=True,
+                             color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
             st.plotly_chart(fig_bar, use_container_width=True)
             
     with cb:
         if 'predicted_level' in data.columns:
             st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
+
+    # --- CONFUSION MATRIX (DIE IST WIEDER DA) ---
+    st.subheader("Deep Dive: AI Prediction vs. Actual Human Assignment")
+    if 'owner_role' in data.columns and 'predicted_level' in data.columns:
+        # Kreuztabelle erstellen
+        matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
+        
+        fig_heat = px.imshow(
+            matrix, 
+            text_auto=True, 
+            color_continuous_scale='Blues',
+            labels=dict(x="Actual Role (Human)", y="Predicted Level (AI)", color="Tickets")
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 except Exception as e:
     st.error(f"Error: {e}")
