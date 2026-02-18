@@ -28,7 +28,7 @@ def load_data():
     if 'confidence_score' in df.columns:
         df['confidence_score'] = df['confidence_score'].str.replace(',', '.').pipe(pd.to_numeric, errors='coerce')
     
-    # Extrahiere Zahlen für Berechnungen (z.B. "Level 1" -> 1)
+    # Extrahiere Zahlen für Berechnungen
     if 'predicted_level' in df.columns:
         df['level_num'] = df['predicted_level'].str.extract('(\d+)').astype(float)
     if 'owner_role' in df.columns:
@@ -50,14 +50,14 @@ def load_data():
     
     return df.sort_values(by='created', ascending=False)
 
-# --- LAYOUT KONFIGURATION ---
+# --- LAYOUT ---
 st.set_page_config(page_title="CS Smart Dashboard", layout="wide")
 st.title("🎫 Customer Success Smart Dashboard")
 
 try:
     data = load_data()
 
-    # --- 2. OPERATIONAL VIEW (Tabelle oben) ---
+    # --- 2. OPERATIONAL VIEW ---
     st.header("Operational View")
     c1, c2, c3 = st.columns(3)
     with c1: 
@@ -89,7 +89,7 @@ try:
     # --- 3. CUSTOMER SUCCESS INSIGHTS ---
     st.header("📊 Customer Success Insights")
     
-    # A) Resolution Time pro Level & Monat
+    # A) Resolution Time
     if 'business_hours' in data.columns and 'predicted_level' in data.columns:
         st.subheader("Avg. Resolution Time (Hours) by Level & Month")
         res_time_data = data.groupby(['m_sort', 'm_name', 'predicted_level'])['business_hours'].mean().reset_index()
@@ -100,36 +100,17 @@ try:
                          color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
         st.plotly_chart(fig_res, use_container_width=True)
 
-    # B) Monthly Volume & Top Owners (NEBENEINANDER)
-    col_a, col_b = st.columns([2, 1])
-    
+    col_a, col_b = st.columns(2)
     with col_a:
-        # Säulendiagramm: Monatliches Volumen
+        # B) Monthly Volume (Wieder volle Spaltenbreite in col_a)
         m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
         fig_vol = px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', title="Monthly Volume & Complexity", text_auto=True,
                          color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
         st.plotly_chart(fig_vol, use_container_width=True)
             
     with col_b:
-        # Tabelle: Top 5 Owners im letzten Monat
-        st.subheader("🏆 Top 5 Owners")
-        if 'owner' in data.columns and 'm_sort' in data.columns:
-            latest_month = data['m_sort'].max()
-            latest_month_name = data[data['m_sort'] == latest_month]['m_name'].iloc[0]
-            
-            top_owners = (data[data['m_sort'] == latest_month]['owner']
-                          .value_counts()
-                          .reset_index()
-                          .rename(columns={'owner': 'Owner', 'count': 'Tickets'}) 
-                          .head(5))
-            
-            st.write(f"Data for: **{latest_month_name}**")
-            st.dataframe(top_owners, use_container_width=True, hide_index=True)
-        else:
-            st.info("No owner data found.")
-
-    # C) Pie Chart
-    st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
+        # C) Pie Chart
+        st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
 
     st.markdown("---")
 
@@ -137,27 +118,23 @@ try:
     st.header("📈 Strategic Insights")
     k1, k2, k3 = st.columns(3)
     
-    # KPI: Auto Route Coverage
     coverage_val = 0.0
     if 'routing_score' in data.columns:
         auto_count = data['routing_score'].fillna("").str.lower().str.contains("auto").sum()
         coverage_val = auto_count / len(data) if len(data) > 0 else 0.0
     k1.metric("Auto Route Coverage", f"{coverage_val:.1%}")
 
-    # KPI: Engineering Noise
     if 'level_num' in data.columns and 'role_num' in data.columns:
         l3_pred = data[data['level_num'] == 3]
         noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
         k2.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
 
-    # KPI: AI Confidence
     k3.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}" if 'confidence_score' in data.columns and not pd.isna(data['confidence_score'].mean()) else "0%")
 
-    # Confusion Matrix
     st.subheader("Deep Dive: AI Prediction vs. Actual Human Assignment")
     if 'owner_role' in data.columns and 'predicted_level' in data.columns:
         matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
         st.plotly_chart(px.imshow(matrix, text_auto=True, color_continuous_scale='Blues'), use_container_width=True)
 
 except Exception as e:
-    st.error(f"Ein Fehler ist aufgetreten: {e}")
+    st.error(f"Fehler: {e}")
