@@ -24,19 +24,22 @@ def load_data():
     csv_url = get_csv_url(SHEET_URL)
     df = pd.read_csv(csv_url, dtype=str)
     
-    # Numerische Korrekturen
+    # 1. Numerische Korrekturen (Confidence Score)
     if 'confidence_score' in df.columns:
-        df['confidence_score'] = df['confidence_score'].str.replace(',', '.').pipe(pd.to_numeric, errors='coerce')
+        # Ersetzt Komma durch Punkt und wandelt alles in Zahlen um, Fehler werden zu NaN
+        df['confidence_score'] = pd.to_numeric(df['confidence_score'].str.replace(',', '.'), errors='coerce')
     
+    # 2. Level Extraktion (sicherstellen, dass es Zahlen sind)
     if 'predicted_level' in df.columns:
-        df['level_num'] = df['predicted_level'].str.extract('(\d+)').astype(float)
+        df['level_num'] = pd.to_numeric(df['predicted_level'].str.extract('(\d+)')[0], errors='coerce')
     if 'owner_role' in df.columns:
-        df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
+        df['role_num'] = pd.to_numeric(df['owner_role'].str.extract('(\d+)')[0], errors='coerce')
 
-    # Zeit-Konvertierung
+    # 3. Zeit-Konvertierung
     df['created'] = pd.to_datetime(df['created'], errors='coerce')
     if 'closed' in df.columns:
         df['closed'] = pd.to_datetime(df['closed'], errors='coerce')
+        # Business Hours nur berechnen, wenn beide Daten vorhanden sind
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
     
     # Hilfsspalten für zeitliche Gruppierung
@@ -56,9 +59,7 @@ st.title("🎫 Customer Success Smart Dashboard")
 try:
     data = load_data()
 
-    # ==========================================
     # --- 2. OPERATIONAL VIEW ---
-    # ==========================================
     st.header("Operational View")
     c1, c2, c3 = st.columns(3)
     with c1: 
@@ -87,12 +88,9 @@ try:
 
     st.markdown("---")
 
-    # ==========================================
     # --- 3. CUSTOMER SUCCESS INSIGHTS ---
-    # ==========================================
     st.header("📊 Customer Success Insights")
     
-    # Sektion: Resolution Time & Top Owners
     if 'business_hours' in data.columns and 'predicted_level' in data.columns:
         col_chart, col_top_owner = st.columns([3, 1])
         
@@ -120,7 +118,6 @@ try:
                 top_owners.columns = ['Owner', 'Tickets']
                 st.table(top_owners)
 
-    # Sektion: Monthly Volume & Distribution
     col_a, col_b = st.columns(2)
     with col_a:
         if 'created' in data.columns:
@@ -136,14 +133,11 @@ try:
 
     st.markdown("---")
 
-    # ==========================================
     # --- 4. STRATEGIC INSIGHTS ---
-    # ==========================================
     st.header("📈 Strategic Insights")
-    
     k1, k2, k3 = st.columns(3)
     
-    # KPI 1: Auto Route Coverage (Flexible Suche)
+    # KPI 1: Auto Route Coverage
     coverage_val = 0.0
     if 'routing_score' in data.columns:
         auto_count = data['routing_score'].fillna("").str.lower().str.contains("auto").sum()
@@ -151,16 +145,21 @@ try:
     k1.metric("Auto Route Coverage", f"{coverage_val:.1%}")
 
     # KPI 2: Engineering Noise
+    noise = 0.0
     if 'level_num' in data.columns and 'role_num' in data.columns:
-        l3_pred = data[data['level_num'] == 3]
-        noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
+        l3_pred = data[data['level_num'] == 3].copy()
+        if len(l3_pred) > 0:
+            # Sicherstellen, dass Vergleiche nur mit Zahlen stattfinden
+            noise = (l3_pred['role_num'] < 3).mean()
         k2.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
 
     # KPI 3: AI Confidence
-    avg_conf = data['confidence_score'].mean() if 'confidence_score' in data.columns else 0
-    k3.metric("Avg. AI Confidence", f"{avg_conf:.1%}")
+    avg_conf = 0.0
+    if 'confidence_score' in data.columns:
+        avg_conf = data['confidence_score'].mean()
+    k3.metric("Avg. AI Confidence", f"{avg_conf:.1%}" if not pd.isna(avg_conf) else "0.0%")
 
-    # Confusion Matrix ganz unten
+    # Confusion Matrix
     st.subheader("Deep Dive: AI Prediction vs. Actual Human Assignment")
     if 'owner_role' in data.columns and 'predicted_level' in data.columns:
         matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
@@ -168,3 +167,4 @@ try:
 
 except Exception as e:
     st.error(f"Ein Fehler ist aufgetreten: {e}")
+    st.info("Hinweis: Überprüfe, ob alle numerischen Spalten im Sheet (z.B. confidence_score) korrekt gefüllt sind.")
