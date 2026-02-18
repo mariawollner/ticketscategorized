@@ -138,7 +138,7 @@ try:
     coverage_val = 0.0
     if 'routing_score' in data.columns:
         clean_vals = data['routing_score'].fillna("").str.lower().str.replace(" ", "").str.replace("-", "")
-        auto_count = (clean_vals == "autoroute").sum()
+        auto_count = (clean_vals == "Auto-route").sum()
         coverage_val = auto_count / len(data) if len(data) > 0 else 0.0
     k1.metric("Auto Route Coverage", f"{coverage_val:.1%}")
 
