@@ -133,3 +133,30 @@ try:
     st.header("📈 Strategic Insights")
     
     k1, k2, k3 = st.columns(3)
+    
+    # KPI 1: Auto Route Coverage
+    coverage_val = 0.0
+    if 'routing_score' in data.columns:
+        clean_vals = data['routing_score'].fillna("").str.lower().str.replace(" ", "").str.replace("-", "")
+        auto_count = (clean_vals == "autoroute").sum()
+        coverage_val = auto_count / len(data) if len(data) > 0 else 0.0
+    k1.metric("Auto Route Coverage", f"{coverage_val:.1%}")
+
+    # KPI 2: Engineering Noise
+    if 'level_num' in data.columns and 'role_num' in data.columns:
+        l3_pred = data[data['level_num'] == 3]
+        noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
+        k2.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
+
+    # KPI 3: AI Confidence
+    k3.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}" if 'confidence_score' in data.columns else "0%")
+
+    # Confusion Matrix ganz unten
+    st.subheader("Deep Dive: AI Prediction vs. Actual Human Assignment")
+    if 'owner_role' in data.columns and 'predicted_level' in data.columns:
+        matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
+        st.plotly_chart(px.imshow(matrix, text_auto=True, color_continuous_scale='Blues', 
+                                  labels=dict(x="Actual Human Role", y="AI Prediction")), use_container_width=True)
+
+except Exception as e:
+    st.error(f"Ein Fehler ist aufgetreten: {e}")
