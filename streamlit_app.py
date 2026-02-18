@@ -24,20 +24,23 @@ def load_data():
     csv_url = get_csv_url(SHEET_URL)
     df = pd.read_csv(csv_url, dtype=str)
     
-    # Korrektur der Datentypen
+    # Numerische Korrekturen
     if 'confidence_score' in df.columns:
         df['confidence_score'] = df['confidence_score'].str.replace(',', '.').pipe(pd.to_numeric, errors='coerce')
     
+    # Zahlen aus Text extrahieren (z.B. "1st-line" -> 1.0)
     if 'predicted_level' in df.columns:
         df['level_num'] = df['predicted_level'].str.extract('(\d+)').astype(float)
     if 'owner_role' in df.columns:
         df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
 
+    # Zeitformate
     df['created'] = pd.to_datetime(df['created'], errors='coerce')
     if 'closed' in df.columns:
         df['closed'] = pd.to_datetime(df['closed'], errors='coerce')
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
     
+    # HubSpot Link
     if 'ticket_id' in df.columns:
         df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
     
@@ -45,39 +48,66 @@ def load_data():
 
 # --- 2. LAYOUT ---
 st.set_page_config(page_title="CS Smart Dashboard", layout="wide")
-st.title("🎫 CS Smart Dashboard: Efficiency & Noise Analysis")
+st.title("🎫 Customer Success Smart Dashboard")
 
 try:
     data = load_data()
 
-    # --- KPI SEKTION ---
-    st.header("Strategic Efficiency Metrics")
-    k1, k2, k3, k4 = st.columns(4)
-    
-    # KPI 1: Speed (Netto Arbeitsstunden)
-    if 'business_hours' in data.columns:
-        k1.metric("Avg. Resolution (Mo-Fr)", f"{data['business_hours'].mean():.1f}h")
-    
-    # KPI 2: Auto Route Coverage (Exakt "Auto Route")
-    if 'routing_status' in data.columns:
-        auto_route_count = (data['routing_status'] == "Auto Route").sum()
-        coverage = auto_route_count / len(data) if len(data) > 0 else 0
-        k2.metric("Auto Route Coverage", f"{coverage:.1%}")
+    # --- OPERATIONAL VIEW ---
+    st.header("Operational View")
+    c1, c2, c3 = st.columns(3)
+    with c1: 
+        owner_options = sorted(data['owner'].dropna().unique()) if 'owner' in data.columns else []
+        owner_f = st.multiselect("Filter by Owner", options=owner_options)
+    with c2: 
+        status_options = sorted(data['status'].dropna().unique()) if 'status' in data.columns else []
+        status_f = st.multiselect("Filter by Status", options=status_options)
+    with c3: 
+        level_options = sorted(data['predicted_level'].dropna().unique()) if 'predicted_level' in data.columns else []
+        level_f = st.multiselect("Filter by Predicted Level", options=level_options)
 
-    # KPI 3: Engineering Noise (L3 Predicted vs. L1/L2 Solved)
-    if 'level_num' in data.columns and 'role_num' in data.columns:
-        l3_predicted = data[data['level_num'] == 3]
-        if len(l3_predicted) > 0:
-            noise_rate = (l3_predicted['role_num'] < 3).mean()
-            k3.metric("Engineering Noise", f"{noise_rate:.1%}", delta="Goal: <10%", delta_color="inverse")
+    df_filtered = data.copy()
+    if owner_f: df_filtered = df_filtered[df_filtered['owner'].isin(owner_f)]
+    if status_f: df_filtered = df_filtered[df_filtered['status'].isin(status_f)]
+    if level_f: df_filtered = df_filtered[df_filtered['predicted_level'].isin(level_f)]
 
-    # KPI 4: AI Quality Score
-    if 'confidence_score' in data.columns:
-        k4.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}")
+    # Tabelle oben anzeigen
+    st.dataframe(
+        df_filtered[['subject', 'created', 'predicted_level', 'owner', 'status', 'hubspot_url']].head(100),
+        column_config={
+            "hubspot_url": st.column_config.LinkColumn("HubSpot Link", display_text="Open 🔗"),
+            "created": st.column_config.DatetimeColumn("Created At", format="DD.MM.YYYY, HH:mm")
+        },
+        use_container_width=True, hide_index=True
+    )
 
     st.markdown("---")
 
-    # --- CHARTS ---
+    # --- STRATEGIC INSIGHTS ---
+    st.header("📈 Strategic Insights")
+    k1, k2, k3, k4 = st.columns(4)
+    
+    # KPI 1: Bearbeitungszeit
+    if 'business_hours' in data.columns:
+        k1.metric("Avg. Resolution (Mo-Fr)", f"{data['business_hours'].mean():.1f}h")
+    
+    # KPI 2: Auto Route Coverage (basierend auf routing_score == "Auto-route")
+    if 'routing_score' in data.columns:
+        auto_route_count = (data['routing_score'] == "Auto-route").sum()
+        coverage = auto_route_count / len(data) if len(data) > 0 else 0
+        k2.metric("Auto Route Coverage", f"{coverage:.1%}", help="Tickets with 'Auto-route' in routing_score")
+
+    # KPI 3: Engineering Noise
+    if 'level_num' in data.columns and 'role_num' in data.columns:
+        l3_pred = data[data['level_num'] == 3]
+        noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
+        k3.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
+
+    # KPI 4: AI Confidence
+    if 'confidence_score' in data.columns:
+        k4.metric("Avg. AI Confidence", f"{data['confidence_score'].mean():.1%}")
+
+    # Diagramme
     ca, cb = st.columns(2)
     with ca:
         if 'created' in data.columns:
@@ -85,26 +115,16 @@ try:
             data['m_sort'] = data['created'].dt.strftime('%Y-%m')
             m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
             
-            fig_bar = px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', 
-                             title="Ticket Volume & Complexity Trend", text_auto=True,
-                             color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
+            fig_bar = px.bar(
+                m_lvl, x='m_name', y='Tickets', color='predicted_level', 
+                title="Monthly Volume & Complexity", text_auto=True,
+                color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"}
+            )
             st.plotly_chart(fig_bar, use_container_width=True)
-
+            
     with cb:
         if 'predicted_level' in data.columns:
             st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
 
-    # --- OPERATIONAL TABLE ---
-    st.header("Operational View (Latest Tickets)")
-    cols_to_show = ['subject', 'created', 'predicted_level', 'owner', 'status', 'hubspot_url']
-    existing_cols = [c for c in cols_to_show if c in data.columns]
-    
-    st.dataframe(
-        data[existing_cols].head(50),
-        column_config={"hubspot_url": st.column_config.LinkColumn("HubSpot Link", display_text="Open 🔗"),
-                       "created": st.column_config.DatetimeColumn("Created At", format="DD.MM.YYYY, HH:mm")},
-        use_container_width=True, hide_index=True
-    )
-
 except Exception as e:
-    st.error(f"Error loading dashboard: {e}")
+    st.error(f"Error: {e}")
