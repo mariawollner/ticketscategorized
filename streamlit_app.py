@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 
-# --- 1. KONFIGURATION ---
+# --- 1. CONFIGURATION ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/14I3ru-sF5Q889NYBzUJDyUzLeIHN8G8ZFwzk78IOCKM/edit?usp=sharing"
 HUBSPOT_PORTAL_ID = "1234567" 
 
@@ -23,45 +23,31 @@ def calculate_business_hours(start, end):
 def load_data():
     csv_url = get_csv_url(SHEET_URL)
     df = pd.read_csv(csv_url, dtype=str)
-    
-    # Numerische Werte & Level Extraktion
     if 'confidence_score' in df.columns:
         df['confidence_score'] = df['confidence_score'].str.replace(',', '.').pipe(pd.to_numeric, errors='coerce')
-    
     if 'predicted_level' in df.columns:
         df['level_num'] = df['predicted_level'].str.extract('(\d+)').astype(float)
     if 'owner_role' in df.columns:
         df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
-
-    # Datumskonvertierung
     df['created'] = pd.to_datetime(df['created'], errors='coerce')
     if 'closed' in df.columns:
         df['closed'] = pd.to_datetime(df['closed'], errors='coerce')
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
-    
-    # HubSpot Link
     if 'ticket_id' in df.columns:
         df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
-    
     return df.sort_values(by='created', ascending=False)
 
 # --- 2. LAYOUT ---
-st.set_page_config(page_title="CS Ticket Dashboard", layout="wide")
-st.title("🎫 Customer Success Ticket Dashboard")
+st.set_page_config(page_title="CS Smart Ticket Dashboard", layout="wide")
+st.title("🎫 Customer Success Smart Dashboard")
 
 try:
     data = load_data()
-
-    # --- 3. OPERATIONAL VIEW ---
     st.header("Operational View")
-    
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        owner_f = st.multiselect("Filter by Owner", options=sorted(data['owner'].dropna().unique()))
-    with col_f2:
-        status_f = st.multiselect("Filter by Status", options=sorted(data['status'].dropna().unique()))
-    with col_f3:
-        level_f = st.multiselect("Filter by Predicted Level", options=sorted(data['predicted_level'].dropna().unique()))
+    c1, c2, c3 = st.columns(3)
+    with c1: owner_f = st.multiselect("Filter by Owner", options=sorted(data['owner'].dropna().unique()))
+    with c2: status_f = st.multiselect("Filter by Status", options=sorted(data['status'].dropna().unique()))
+    with c3: level_f = st.multiselect("Filter by Predicted Level", options=sorted(data['predicted_level'].dropna().unique()))
 
     df_filtered = data.copy()
     if owner_f: df_filtered = df_filtered[df_filtered['owner'].isin(owner_f)]
@@ -70,72 +56,43 @@ try:
 
     st.dataframe(
         df_filtered[['subject', 'created', 'predicted_level', 'owner', 'status', 'routing_status', 'hubspot_url']],
-        column_config={
-            "hubspot_url": st.column_config.LinkColumn("HubSpot Link", display_text="Open Ticket 🔗"),
-            "created": st.column_config.DatetimeColumn("Created At", format="DD.MM.YYYY, HH:mm"),
-        },
+        column_config={"hubspot_url": st.column_config.LinkColumn("HubSpot Link", display_text="Open 🔗"),
+                       "created": st.column_config.DatetimeColumn("Created", format="DD.MM.YY, HH:mm")},
         use_container_width=True, hide_index=True
     )
 
     st.markdown("---")
-
-    # --- 4. STRATEGIC INSIGHTS ---
     st.header("📈 Strategic Insights")
-
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    k1, k2, k3, k4 = st.columns(4)
     
     if 'business_hours' in data.columns:
-        kpi1.metric("Avg. Resolution (Mo-Fr)", f"{data['business_hours'].mean():.1f}h")
+        k1.metric("Avg. Resolution (Mo-Fr)", f"{data['business_hours'].mean():.1f}h")
     
     if 'confidence_score' in data.columns:
-        kpi2.metric("Avg. Confidence Score", f"{data['confidence_score'].mean():.1%}")
+        cov = data['confidence_score'].notnull().mean()
+        k2.metric("Auto Route Coverage", f"{cov:.1%}")
 
-    if 'role_num' in data.columns and 'level_num' in data.columns:
-        correct = (data['role_num'] == data['level_num']).sum()
-        acc = correct / len(data) if len(data) > 0 else 0
-        kpi3.metric("Routing Accuracy", f"{acc:.1%}")
+    if 'level_num' in data.columns and 'role_num' in data.columns:
+        l3_pred = data[data['level_num'] == 3]
+        noise = (l3_pred['role_num'] < 3).mean() if len(l3_pred) > 0 else 0
+        k3.metric("Engineering Noise", f"{noise:.1%}", delta="Goal: <10%", delta_color="inverse")
 
-    if 'level_num' in data.columns:
-        l3_share = (data['level_num'] == 3).sum() / len(data) if len(data) > 0 else 0
-        kpi4.metric("Level 3 Share", f"{l3_share:.1%}")
+    if 'confidence_score' in data.columns:
+        k4.metric("AI Confidence Avg.", f"{data['confidence_score'].mean():.1%}")
 
-    # Visualisierungen
-    col_chart_a, col_chart_b = st.columns(2)
+    ca, cb = st.columns(2)
+    with ca:
+        data['m_name'] = data['created'].dt.strftime('%B %Y')
+        data['m_sort'] = data['created'].dt.strftime('%Y-%m')
+        m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
+        st.plotly_chart(px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', title="Monthly Volume & Complexity", text_auto=True), use_container_width=True)
+    with cb:
+        st.plotly_chart(px.pie(data, names='predicted_level', title="Level Distribution", hole=0.4), use_container_width=True)
 
-    with col_chart_a:
-        if 'created' in data.columns:
-            # Daten für das gestapelte Balkendiagramm vorbereiten
-            data['month_sort'] = data['created'].dt.strftime('%Y-%m')
-            data['month_name'] = data['created'].dt.strftime('%B %Y')
-            
-            # Gruppieren nach Monat UND Level
-            monthly_lvl = data.groupby(['month_sort', 'month_name', 'predicted_level']).size().reset_index(name='Tickets')
-            monthly_lvl = monthly_lvl.sort_values('month_sort')
-            
-            # Stacked Bar Chart
-            fig_bar = px.bar(
-                monthly_lvl, 
-                x='month_name', 
-                y='Tickets', 
-                color='predicted_level', # Hier passiert die Magie der Einfärbung
-                title="Ticket Volume & Level Distribution per Month",
-                text_auto=True,
-                barmode='stack' # Stapelt die Level übereinander
-            )
-            fig_bar.update_layout(xaxis_title="Month", yaxis_title="Number of Tickets", legend_title="Predicted Level")
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-    with col_chart_b:
-        if 'predicted_level' in data.columns:
-            fig_pie = px.pie(data, names='predicted_level', title="Total Level Distribution", hole=0.4)
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-    # Heatmap
-    st.subheader("Deep Dive: AI Prediction vs. Human Assignment")
+    st.subheader("Routing Analysis: AI Prediction vs. Human Assignment")
     if 'owner_role' in data.columns and 'predicted_level' in data.columns:
         matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
-        fig_heat = px.imshow(matrix, text_auto=True, color_continuous_scale='Blues', labels=dict(x="Actual Role", y="AI Prediction"))
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(px.imshow(matrix, text_auto=True, color_continuous_scale='Blues'), use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error loading dashboard: {e}")
+    st.error(f"Error: {e}")
