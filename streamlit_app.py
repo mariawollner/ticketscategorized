@@ -4,7 +4,7 @@ import plotly.express as px
 
 # --- 1. KONFIGURATION ---
 # Ersetze diesen Link durch deinen Google Sheet Browser-Link
-SHEET_URL = "DEIN_NORMALER_GOOGLE_SHEET_LINK"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/14I3ru-sF5Q889NYBzUJDyUzLeIHN8G8ZFwzk78IOCKM/edit?usp=sharing"
 # Ersetze die Portal ID durch deine HubSpot ID (aus der Browser-URL bei HubSpot)
 HUBSPOT_PORTAL_ID = "1234567" 
 
