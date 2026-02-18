@@ -19,7 +19,7 @@ def calculate_business_hours(start, end):
         return np.nan
     # Business Days (Mo-Fr) zählen
     bdays = len(pd.bdate_range(start, end)) - 1
-    # Berechnung der Stunden
+    # Berechnung der Stunden (vereinfacht auf 24h Basis pro Werktag)
     total_hours = (bdays * 24) + (end.hour - start.hour) + (end.minute - start.minute) / 60
     return max(0, total_hours)
 
@@ -42,10 +42,17 @@ def load_data():
         df['business_hours'] = df.apply(lambda row: calculate_business_hours(row['created'], row['closed']), axis=1)
     
     # HubSpot Link generieren
-    df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
+    if 'ticket_id' in df.columns:
+        df['hubspot_url'] = df['ticket_id'].apply(lambda x: f"https://app.hubspot.com/contacts/{HUBSPOT_PORTAL_ID}/ticket/{x}")
+    else:
+        df['hubspot_url'] = ""
     
     # Accuracy-Extraktion (Zahl aus owner_role extrahieren)
-    df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
+    if 'owner_role' in df.columns:
+        df['role_num'] = df['owner_role'].str.extract('(\d+)').astype(float)
+    
+    # Sortierung: Neueste Tickets zuerst
+    df = df.sort_values(by='created', ascending=False)
     
     return df
 
@@ -61,13 +68,13 @@ try:
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        owner_list = sorted(data['owner'].dropna().unique())
+        owner_list = sorted(data['owner'].dropna().unique()) if 'owner' in data.columns else []
         owner_f = st.multiselect("Filter by Owner", options=owner_list)
     with c2:
-        status_list = sorted(data['status'].dropna().unique())
+        status_list = sorted(data['status'].dropna().unique()) if 'status' in data.columns else []
         status_f = st.multiselect("Filter by Status", options=status_list)
     with c3:
-        level_list = sorted([int(x) for x in data['predicted_level'].dropna().unique()])
+        level_list = sorted([int(x) for x in data['predicted_level'].dropna().unique()]) if 'predicted_level' in data.columns else []
         level_f = st.multiselect("Filter by Predicted Level", options=level_list)
 
     # Filter anwenden
@@ -80,8 +87,11 @@ try:
         df_filtered = df_filtered[df_filtered['predicted_level'].isin(level_f)]
 
     # Tabelle anzeigen
+    cols_to_show = ['subject', 'created', 'predicted_level', 'owner', 'status', 'routing_status', 'hubspot_url']
+    existing_cols = [c for c in cols_to_show if c in df_filtered.columns]
+    
     st.dataframe(
-        df_filtered[['subject', 'created', 'predicted_level', 'owner', 'status', 'routing_status', 'hubspot_url']],
+        df_filtered[existing_cols],
         column_config={
             "hubspot_url": st.column_config.LinkColumn("HubSpot Link", display_text="Open Ticket"),
             "created": st.column_config.DatetimeColumn("Created At", format="DD.MM.YYYY, HH:mm"),
@@ -106,32 +116,36 @@ try:
     if 'confidence_score' in data.columns:
         kpi2.metric("Avg. Confidence", f"{data['confidence_score'].mean():.1%}")
 
-    correct = (data['role_num'] == data['predicted_level']).sum()
-    acc = correct / len(data) if len(data) > 0 else 0
-    kpi3.metric("Routing Accuracy", f"{acc:.1%}")
+    if 'role_num' in data.columns and 'predicted_level' in data.columns:
+        correct = (data['role_num'] == data['predicted_level']).sum()
+        acc = correct / len(data) if len(data) > 0 else 0
+        kpi3.metric("Routing Accuracy", f"{acc:.1%}")
 
-    l3_share = (data['predicted_level'] == 3).sum() / len(data) if len(data) > 0 else 0
-    kpi4.metric("Level 3 Share", f"{l3_share:.1%}")
+    if 'predicted_level' in data.columns:
+        l3_share = (data['predicted_level'] == 3).sum() / len(data) if len(data) > 0 else 0
+        kpi4.metric("Level 3 Share", f"{l3_share:.1%}")
 
     # Visualisierungen
     col_a, col_b = st.columns(2)
     with col_a:
-        # Hier lag der Syntax-Fehler - jetzt repariert:
-        data['month'] = data['created'].dt.strftime('%Y-%m')
-        monthly_counts = data.groupby('month').size().reset_index(name='Tickets')
-        fig_line = px.line(monthly_counts, x='month', y='Tickets', title="Ticket Volume per Month", markers=True)
-        st.plotly_chart(fig_line, use_container_width=True)
+        if 'created' in data.columns:
+            data['month'] = data['created'].dt.strftime('%Y-%m')
+            monthly_counts = data.groupby('month').size().reset_index(name='Tickets')
+            fig_line = px.line(monthly_counts, x='month', y='Tickets', title="Ticket Volume per Month", markers=True)
+            st.plotly_chart(fig_line, use_container_width=True)
 
     with col_b:
-        fig_pie = px.pie(data, names='predicted_level', title="Level Distribution", hole=0.4)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        if 'predicted_level' in data.columns:
+            fig_pie = px.pie(data, names='predicted_level', title="Level Distribution", hole=0.4)
+            st.plotly_chart(fig_pie, use_container_width=True)
 
     # Heatmap für Strategen
     st.subheader("Deep Dive: AI Prediction vs. Human Assignment")
-    if not data['owner_role'].isnull().all():
-        matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
-        fig_heat = px.imshow(matrix, text_auto=True, color_continuous_scale='RdYlGn', labels=dict(x="Actual Role", y="Predicted Level"))
-        st.plotly_chart(fig_heat, use_container_width=True)
+    if 'owner_role' in data.columns and 'predicted_level' in data.columns:
+        if not data['owner_role'].isnull().all():
+            matrix = pd.crosstab(data['predicted_level'], data['owner_role'])
+            fig_heat = px.imshow(matrix, text_auto=True, color_continuous_scale='RdYlGn', labels=dict(x="Actual Role", y="Predicted Level"))
+            st.plotly_chart(fig_heat, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Ein Fehler ist aufgetreten: {
+    st.error(f"Ein Fehler ist aufgetreten: {e}")
