@@ -90,12 +90,12 @@ try:
     st.header("📊 Customer Success Insights")
     
     # A) Resolution Time
-    if 'business_hours' in data.columns and 'predicted_level' in data.columns:
+    if 'business_hours' in data.columns and 'owner_role' in data.columns:
         st.subheader("Avg. Resolution Time (Hours) by Level & Month")
-        res_time_data = data.groupby(['m_sort', 'm_name', 'predicted_level'])['business_hours'].mean().reset_index()
+        res_time_data = data.groupby(['m_sort', 'm_name', 'owner_role'])['business_hours'].mean().reset_index()
         res_time_data = res_time_data.sort_values('m_sort')
         
-        fig_res = px.bar(res_time_data, x='m_name', y='business_hours', color='predicted_level',
+        fig_res = px.bar(res_time_data, x='m_name', y='business_hours', color='owner_role',
                          barmode='group', text_auto='.1f',
                          color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
         st.plotly_chart(fig_res, use_container_width=True)
@@ -103,14 +103,14 @@ try:
     col_a, col_b = st.columns(2)
     with col_a:
         # B) Monthly Volume (Wieder volle Spaltenbreite in col_a)
-        m_lvl = data.groupby(['m_sort', 'm_name', 'predicted_level']).size().reset_index(name='Tickets').sort_values('m_sort')
-        fig_vol = px.bar(m_lvl, x='m_name', y='Tickets', color='predicted_level', title="Monthly Volume & Complexity", text_auto=True,
+        m_lvl = data.groupby(['m_sort', 'm_name', 'owner_role']).size().reset_index(name='Tickets').sort_values('m_sort')
+        fig_vol = px.bar(m_lvl, x='m_name', y='Tickets', color='owner_role', title="Monthly Volume & Complexity", text_auto=True,
                          color_discrete_map={"1st level": "#2ecc71", "2nd level": "#f1c40f", "3rd level": "#e74c3c"})
         st.plotly_chart(fig_vol, use_container_width=True)
             
     with col_b:
         # C) Pie Chart
-        st.plotly_chart(px.pie(data, names='predicted_level', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
+        st.plotly_chart(px.pie(data, names='owner_role', title="Total Complexity Distribution", hole=0.4), use_container_width=True)
 
     st.markdown("---")
 
